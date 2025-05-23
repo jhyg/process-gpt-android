@@ -1,0 +1,32 @@
+{
+  "name": "process-gpt-android",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "capacitor:build": "vite build && npx cap copy",
+    "capacitor:sync": "npx cap sync",
+    "capacitor:android": "npx cap open android",
+    "android:build": "npm run build && npm run capacitor:sync && npm run capacitor:android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.2.0",
+    "@capacitor/camera": "^7.0.1",
+    "@capacitor/cli": "^7.2.0",
+    "@capacitor/core": "^7.2.0",
+    "@capacitor/device": "^7.0.1",
+    "@capacitor/filesystem": "^7.0.1",
+    "@capacitor/push-notifications": "^7.0.1",
+    "axios": "^1.9.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.3",
+    "vite": "^6.2.4",
+    "vite-plugin-vue-devtools": "^7.7.2"
+  }
+}

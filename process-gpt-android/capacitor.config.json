@@ -1,0 +1,20 @@
+{
+  "appId": "com.process.gpt",
+  "appName": "Process GPT",
+  "webDir": "dist",
+  "server": {
+    "url": "https://jhyg.process-gpt.io",
+    "cleartext": true
+  },
+  "plugins": {
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
