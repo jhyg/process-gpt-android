@@ -33,7 +33,7 @@ public class FCMService extends FirebaseMessagingService {
                 remoteMessage.getNotification().getTitle() : data.get("title");
         String body = remoteMessage.getNotification() != null ? 
                 remoteMessage.getNotification().getBody() : data.get("body");
-                
+        
         // 디버그 로그
         System.out.println(TAG + ": 푸시 알림 수신 - " + title + ": " + body);
         

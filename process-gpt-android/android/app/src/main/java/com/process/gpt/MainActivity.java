@@ -19,18 +19,20 @@ import androidx.core.content.ContextCompat;
 import android.content.ComponentName;
 import android.app.NotificationChannel;
 import android.provider.Settings.Secure;
+import android.os.Handler;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "ProcessGPTMain";
     private static MainActivity instance;
     private static final int NOTIFICATION_PERMISSION_CODE = 123;
     private static final String CHANNEL_ID = "process_gpt_channel";
+    private String pendingToken = null;
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
-        // 인스턴스 저장
         instance = this;
         
         // Android 13 이상에서 알림 권한 요청
@@ -41,28 +43,50 @@ public class MainActivity extends BridgeActivity {
                         new String[]{Manifest.permission.POST_NOTIFICATIONS},
                         NOTIFICATION_PERMISSION_CODE);
             } else {
-                // 이미 권한이 있는 경우 알림 설정 활성화
                 enableNotificationSettings();
             }
         } else {
-            // Android 13 미만에서는 바로 알림 설정 활성화
             enableNotificationSettings();
         }
         
         // Firebase 초기화
         FirebaseApp.initializeApp(this);
         
-        // FCM 토큰 확인 (디버깅용)
-        FirebaseMessaging.getInstance().getToken()
-                .addOnCompleteListener(task -> {
-                    if (!task.isSuccessful()) {
-                        System.err.println(TAG + ": FCM 토큰 획득 실패");
-                        return;
-                    }
-                    // 토큰 획득 성공
-                    String token = task.getResult();
-                    System.out.println(TAG + ": FCM 토큰: " + token);
-                });
+        // WebViewClient 설정
+        WebView webView = getBridge().getWebView();
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                
+                // 페이지 로드 완료 후 5초 대기 (main.ts 실행 시간 확보)
+                new Handler().postDelayed(() -> {
+                    // FCM 토큰 가져오기
+                    FirebaseMessaging.getInstance().getToken()
+                        .addOnCompleteListener(task -> {
+                            if (!task.isSuccessful()) {
+                                System.err.println(TAG + ": FCM 토큰 획득 실패");
+                                return;
+                            }
+                            String token = task.getResult();
+                            System.out.println(TAG + ": FCM 토큰: " + token);
+
+                            // 웹뷰로 이벤트 전송
+                            Bridge bridge = getBridge();
+                             if (bridge != null) {
+                                try {
+                                    JSObject eventData = new JSObject();
+                                    eventData.put("token", token);
+                                    bridge.triggerWindowJSEvent("fcmTokenReceived", eventData.toString());
+                                    System.out.println(TAG + ": 웹뷰 준비완료 후 토큰 전송");
+                                } catch (Exception e) {
+                                    System.err.println(TAG + ": 토큰 전송 중 오류: " + e.getMessage());
+                                }
+                            }
+                        });
+                }, 5000); // 5초 대기
+            }
+        });
     }
     
     private void enableNotificationSettings() {
