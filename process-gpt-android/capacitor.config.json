@@ -3,7 +3,7 @@
   "appName": "Process GPT",
   "webDir": "dist",
   "server": {
-    "url": "https://jhyg.process-gpt.io",
+    "url": "https://www.process-gpt.io",
     "cleartext": true
   },
   "plugins": {

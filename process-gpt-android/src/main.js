@@ -9,7 +9,7 @@ import { PushNotifications } from '@capacitor/push-notifications'
 
 // axios 기본 설정
 axios.defaults.baseURL = Capacitor.isNativePlatform() 
-  ? 'https://jhyg.process-gpt.io' 
+  ? 'https://www.process-gpt.io' 
   : window.location.origin;
 
 // 푸시 알림 초기화 (네이티브 플랫폼에서만)

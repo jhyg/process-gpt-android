@@ -22,6 +22,7 @@ import android.provider.Settings.Secure;
 import android.os.Handler;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.JavascriptInterface;
 
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "ProcessGPTMain";
@@ -54,6 +55,17 @@ public class MainActivity extends BridgeActivity {
         
         // WebViewClient 설정
         WebView webView = getBridge().getWebView();
+        
+        // JavaScript Interface 추가
+        webView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void changeTenant(String tenantId) {
+                runOnUiThread(() -> {
+                    webView.loadUrl("https://" + tenantId + ".process-gpt.io");
+                });
+            }
+        }, "AndroidBridge");
+        
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
