@@ -23,6 +23,10 @@ import android.os.Handler;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.JavascriptInterface;
+import android.webkit.CookieManager;
+import android.webkit.WebSettings;
+import android.content.SharedPreferences;
+import android.util.Log;
 
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "ProcessGPTMain";
@@ -30,11 +34,15 @@ public class MainActivity extends BridgeActivity {
     private static final int NOTIFICATION_PERMISSION_CODE = 123;
     private static final String CHANNEL_ID = "process_gpt_channel";
     private String pendingToken = null;
+    private SharedPreferences sharedPreferences;
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         instance = this;
+        
+        // SharedPreferences 초기화
+        sharedPreferences = getSharedPreferences("ProcessGPT", MODE_PRIVATE);
         
         // Android 13 이상에서 알림 권한 요청
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -53,16 +61,42 @@ public class MainActivity extends BridgeActivity {
         // Firebase 초기화
         FirebaseApp.initializeApp(this);
         
-        // WebViewClient 설정
+        // WebView 설정
         WebView webView = getBridge().getWebView();
+        WebSettings webSettings = webView.getSettings();
         
-        // JavaScript Interface 추가
+        // 쿠키 활성화
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        
+        // JavaScript 인터페이스 추가
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void changeTenant(String tenantId) {
                 runOnUiThread(() -> {
                     webView.loadUrl("https://" + tenantId + ".process-gpt.io");
                 });
+            }
+            
+            @JavascriptInterface
+            public void saveSessionToken(String accessToken, String refreshToken) {
+                sharedPreferences.edit()
+                    .putString("access_token", accessToken)
+                    .putString("refresh_token", refreshToken)
+                    .apply();
+            }
+            
+            @JavascriptInterface
+            public String getSessionToken() {
+                String accessToken = sharedPreferences.getString("access_token", "");
+                String refreshToken = sharedPreferences.getString("refresh_token", "");
+                return String.format("{\"access_token\":\"%s\",\"refresh_token\":\"%s\"}", accessToken, refreshToken);
+            }
+            
+            @JavascriptInterface
+            public void clearSession() {
+                sharedPreferences.edit().clear().apply();
+                CookieManager.getInstance().removeAllCookies(null);
             }
         }, "AndroidBridge");
         
