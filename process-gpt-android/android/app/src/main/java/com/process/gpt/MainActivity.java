@@ -63,7 +63,16 @@ public class MainActivity extends BridgeActivity {
         
         // WebView 설정
         WebView webView = getBridge().getWebView();
+        webView.clearCache(true);
         WebSettings webSettings = webView.getSettings();
+        
+        // CORS 및 보안 설정 완화
+        webSettings.setDomStorageEnabled(true);
+        webSettings.setDatabaseEnabled(true);
+        webSettings.setAllowContentAccess(true);
+        webSettings.setAllowFileAccess(true);
+        webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
         
         // 쿠키 활성화
         CookieManager.getInstance().setAcceptCookie(true);
@@ -80,17 +89,27 @@ public class MainActivity extends BridgeActivity {
             
             @JavascriptInterface
             public void saveSessionToken(String accessToken, String refreshToken) {
-                sharedPreferences.edit()
-                    .putString("access_token", accessToken)
-                    .putString("refresh_token", refreshToken)
-                    .apply();
+                try {
+                    sharedPreferences.edit()
+                        .putString("access_token", accessToken)
+                        .putString("refresh_token", refreshToken)
+                        .apply();
+                    System.out.println(TAG + ": 세션 토큰 저장 완료");
+                } catch (Exception e) {
+                    System.err.println(TAG + ": 세션 토큰 저장 중 오류 발생: " + e.getMessage());
+                }
             }
             
             @JavascriptInterface
             public String getSessionToken() {
-                String accessToken = sharedPreferences.getString("access_token", "");
-                String refreshToken = sharedPreferences.getString("refresh_token", "");
-                return String.format("{\"access_token\":\"%s\",\"refresh_token\":\"%s\"}", accessToken, refreshToken);
+                try {
+                    String accessToken = sharedPreferences.getString("access_token", "");
+                    String refreshToken = sharedPreferences.getString("refresh_token", "");
+                    return String.format("{\"access_token\":\"%s\",\"refresh_token\":\"%s\"}", accessToken, refreshToken);
+                } catch (Exception e) {
+                    System.err.println(TAG + ": 세션 토큰 조회 중 오류 발생: " + e.getMessage());
+                    return "{}";
+                }
             }
             
             @JavascriptInterface

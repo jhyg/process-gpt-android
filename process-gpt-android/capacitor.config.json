@@ -11,10 +11,11 @@
       "presentationOptions": ["badge", "sound", "alert"]
     },
     "CapacitorHttp": {
-      "enabled": true
+      "enabled": false
     }
   },
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
   }
 }
