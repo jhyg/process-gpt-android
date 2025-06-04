@@ -18,11 +18,19 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.Bridge;
+import android.content.SharedPreferences;
+import java.util.Set;
+import java.util.HashSet;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 public class FCMService extends FirebaseMessagingService {
     private static final String CHANNEL_ID = "process_gpt_channel";
     private static final String TAG = "ProcessGPTFCM";
-
+    private static final String PREFS_NAME = "FCMMessageHashes";
+    private static final String PROCESSED_MESSAGES_KEY = "processed_message_hashes";
+    private static final long MESSAGE_DUPLICATE_TIME_WINDOW = 30 * 1000; // 30초
+    
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
         // 메시지 데이터 확인
@@ -34,8 +42,23 @@ public class FCMService extends FirebaseMessagingService {
         String body = remoteMessage.getNotification() != null ? 
                 remoteMessage.getNotification().getBody() : data.get("body");
         
+        // 메시지 내용 해시 생성 및 중복 확인
+        String messageHash = generateMessageHash(title, body, data);
+        if (isDuplicateMessage(messageHash)) {
+            System.out.println(TAG + ": 중복 메시지 감지, 무시합니다. Hash: " + messageHash);
+            System.out.println(TAG + ": 내용 - " + title + ": " + body);
+            return;
+        }
+        
+        // 메시지 ID 정보
+        String messageId = remoteMessage.getMessageId();
+        
         // 디버그 로그
         System.out.println(TAG + ": 푸시 알림 수신 - " + title + ": " + body);
+        System.out.println(TAG + ": MessageId: " + messageId + ", Hash: " + messageHash);
+        
+        // 메시지 해시 저장 (중복 방지용)
+        saveProcessedMessageHash(messageHash);
         
         // 앱이 포그라운드 상태일 때도 알림을 표시
         sendNotification(title, body, data);
@@ -47,6 +70,8 @@ public class FCMService extends FirebaseMessagingService {
                 JSObject notificationJson = new JSObject();
                 notificationJson.put("title", title);
                 notificationJson.put("body", body);
+                notificationJson.put("messageId", messageId);
+                notificationJson.put("messageHash", messageHash);
                 
                 // 데이터 필드 추가
                 JSObject dataJson = new JSObject();
@@ -60,7 +85,7 @@ public class FCMService extends FirebaseMessagingService {
                 if (activity != null) {
                     activity.runOnUiThread(() -> {
                         bridge.triggerWindowJSEvent("pushNotificationReceived", notificationJson.toString());
-                        System.out.println(TAG + ": 포그라운드 이벤트 전달 성공");
+                        System.out.println(TAG + ": 포그라운드 이벤트 전달 성공 (Hash: " + messageHash + ")");
                     });
                 }
             } else {
@@ -70,6 +95,103 @@ public class FCMService extends FirebaseMessagingService {
             System.err.println(TAG + ": Capacitor 이벤트 전달 중 오류: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+    
+    /**
+     * 메시지 내용으로 해시값 생성
+     */
+    private String generateMessageHash(String title, String body, Map<String, String> data) {
+        StringBuilder contentBuilder = new StringBuilder();
+        
+        // 기본 정보 추가
+        contentBuilder.append(title != null ? title : "");
+        contentBuilder.append("|");
+        contentBuilder.append(body != null ? body : "");
+        contentBuilder.append("|");
+        
+        // 중요한 데이터 필드들 추가 (보낸사람, 채팅방 등)
+        String[] importantKeys = {"sender", "senderId", "senderName", "roomId", "roomName", "chatId", "from", "type"};
+        for (String key : importantKeys) {
+            if (data.containsKey(key)) {
+                contentBuilder.append(key).append(":").append(data.get(key)).append("|");
+            }
+        }
+        
+        String content = contentBuilder.toString();
+        
+        try {
+            // SHA-256 해시 생성
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(content.getBytes("UTF-8"));
+            
+            // 바이트 배열을 16진수 문자열로 변환
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+            return hexString.toString().substring(0, 16); // 앞 16자리만 사용
+        } catch (Exception e) {
+            System.err.println(TAG + ": 해시 생성 오류: " + e.getMessage());
+            // 해시 생성 실패 시 문자열 해시코드 사용
+            return String.valueOf(Math.abs(content.hashCode()));
+        }
+    }
+    
+    /**
+     * 메시지 해시가 이미 처리되었는지 확인 (시간 기반)
+     */
+    private boolean isDuplicateMessage(String messageHash) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        Set<String> processedHashes = prefs.getStringSet(PROCESSED_MESSAGES_KEY, new HashSet<>());
+        
+        // 현재 시간과 함께 저장된 해시 형식: "messageHash:timestamp"
+        long currentTime = System.currentTimeMillis();
+        
+        // 기존 해시들 중에서 시간 윈도우 내의 것들만 확인
+        Set<String> validHashes = new HashSet<>();
+        for (String entry : processedHashes) {
+            String[] parts = entry.split(":");
+            if (parts.length == 2) {
+                try {
+                    long timestamp = Long.parseLong(parts[1]);
+                    if (currentTime - timestamp < MESSAGE_DUPLICATE_TIME_WINDOW) {
+                        validHashes.add(entry);
+                        // 해시가 일치하는지 확인
+                        if (parts[0].equals(messageHash)) {
+                            return true; // 중복 메시지
+                        }
+                    }
+                } catch (NumberFormatException e) {
+                    // 잘못된 형식은 무시
+                }
+            }
+        }
+        
+        // 시간 윈도우를 벗어난 해시들 정리
+        if (validHashes.size() != processedHashes.size()) {
+            prefs.edit().putStringSet(PROCESSED_MESSAGES_KEY, validHashes).apply();
+        }
+        
+        return false; // 새로운 메시지
+    }
+    
+    /**
+     * 처리된 메시지 해시 저장
+     */
+    private void saveProcessedMessageHash(String messageHash) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        Set<String> processedHashes = new HashSet<>(prefs.getStringSet(PROCESSED_MESSAGES_KEY, new HashSet<>()));
+        
+        // 현재 시간과 함께 저장: "messageHash:timestamp"
+        String entry = messageHash + ":" + System.currentTimeMillis();
+        processedHashes.add(entry);
+        
+        prefs.edit().putStringSet(PROCESSED_MESSAGES_KEY, processedHashes).apply();
+        System.out.println(TAG + ": 메시지 해시 저장 완료: " + messageHash);
     }
 
     @Override
