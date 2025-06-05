@@ -83,7 +83,7 @@ public class MainActivity extends BridgeActivity {
             @JavascriptInterface
             public void changeTenant(String tenantId) {
                 runOnUiThread(() -> {
-                    webView.loadUrl("https://" + tenantId + ".process-gpt.io");
+                    webView.loadUrl("https://" + tenantId + ".process-gpt.io/definition-map");
                 });
             }
             
