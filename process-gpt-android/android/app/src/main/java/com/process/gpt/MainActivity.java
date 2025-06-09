@@ -27,6 +27,9 @@ import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.content.SharedPreferences;
 import android.util.Log;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.widget.Toast;
 
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "ProcessGPTMain";
@@ -35,6 +38,9 @@ public class MainActivity extends BridgeActivity {
     private static final String CHANNEL_ID = "process_gpt_channel";
     private String pendingToken = null;
     private SharedPreferences sharedPreferences;
+    private boolean backPressHandled = false; // JavaScript에서 백 버튼 처리 여부
+    private long backPressedTime = 0; // 이전 백 버튼 누른 시간
+    private static final int BACK_PRESS_TIMEOUT = 2000; // 2초
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -117,6 +123,13 @@ public class MainActivity extends BridgeActivity {
                 sharedPreferences.edit().clear().apply();
                 CookieManager.getInstance().removeAllCookies(null);
             }
+            
+            @JavascriptInterface
+            public void handleBackButton(boolean handled) {
+                // JavaScript에서 백 버튼 처리 결과를 받음
+                backPressHandled = handled;
+                System.out.println(TAG + ": JavaScript 백 버튼 처리 결과: " + handled);
+            }
         }, "AndroidBridge");
         
         webView.setWebViewClient(new WebViewClient() {
@@ -152,6 +165,70 @@ public class MainActivity extends BridgeActivity {
                 }, 5000); // 5초 대기
             }
         });
+    }
+    
+    @Override
+    public void onBackPressed() {
+        WebView webView = getBridge().getWebView();
+        
+        // 1단계: JavaScript에 백 버튼 이벤트 전달 (팝업/모달 확인용)
+        backPressHandled = false;
+        try {
+            Bridge bridge = getBridge();
+            if (bridge != null) {
+                bridge.triggerWindowJSEvent("androidBackButton", "{}");
+                System.out.println(TAG + ": JavaScript에 백 버튼 이벤트 전달");
+                
+                // JavaScript 처리를 위해 100ms 대기
+                new Handler().postDelayed(() -> {
+                    if (backPressHandled) {
+                        // JavaScript에서 처리됨 (팝업 닫기 등)
+                        System.out.println(TAG + ": JavaScript에서 백 버튼 처리 완료");
+                        return;
+                    }
+                    
+                    // 2단계: WebView 히스토리 확인
+                    if (webView.canGoBack()) {
+                        System.out.println(TAG + ": WebView 뒤로 가기 실행");
+                        webView.goBack();
+                        return;
+                    }
+                    
+                    // 3단계: 앱 종료 확인
+                    handleAppExit();
+                }, 100);
+            } else {
+                // Bridge가 없으면 바로 WebView 히스토리 확인
+                if (webView.canGoBack()) {
+                    webView.goBack();
+                } else {
+                    handleAppExit();
+                }
+            }
+        } catch (Exception e) {
+            System.err.println(TAG + ": 백 버튼 처리 중 오류: " + e.getMessage());
+            // 오류 발생 시 기본 동작
+            if (webView.canGoBack()) {
+                webView.goBack();
+            } else {
+                handleAppExit();
+            }
+        }
+    }
+    
+    private void handleAppExit() {
+        long currentTime = System.currentTimeMillis();
+        
+        if (currentTime - backPressedTime < BACK_PRESS_TIMEOUT) {
+            // 2초 이내에 다시 백 버튼을 누르면 앱 종료
+            System.out.println(TAG + ": 앱 종료");
+            super.onBackPressed();
+        } else {
+            // 첫 번째 백 버튼: 토스트 메시지 표시
+            backPressedTime = currentTime;
+            Toast.makeText(this, "뒤로 버튼을 한 번 더 누르면 앱이 종료됩니다.", Toast.LENGTH_SHORT).show();
+            System.out.println(TAG + ": 앱 종료 경고 표시");
+        }
     }
     
     private void enableNotificationSettings() {
