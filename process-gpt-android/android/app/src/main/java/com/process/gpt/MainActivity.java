@@ -38,7 +38,6 @@ public class MainActivity extends BridgeActivity {
     private static final String CHANNEL_ID = "process_gpt_channel";
     private String pendingToken = null;
     private SharedPreferences sharedPreferences;
-    private boolean backPressHandled = false; // JavaScript에서 백 버튼 처리 여부
     private long backPressedTime = 0; // 이전 백 버튼 누른 시간
     private static final int BACK_PRESS_TIMEOUT = 2000; // 2초
     
@@ -123,13 +122,6 @@ public class MainActivity extends BridgeActivity {
                 sharedPreferences.edit().clear().apply();
                 CookieManager.getInstance().removeAllCookies(null);
             }
-            
-            @JavascriptInterface
-            public void handleBackButton(boolean handled) {
-                // JavaScript에서 백 버튼 처리 결과를 받음
-                backPressHandled = handled;
-                System.out.println(TAG + ": JavaScript 백 버튼 처리 결과: " + handled);
-            }
         }, "AndroidBridge");
         
         webView.setWebViewClient(new WebViewClient() {
@@ -170,41 +162,41 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onBackPressed() {
         WebView webView = getBridge().getWebView();
-        
-        // 1단계: JavaScript에 백 버튼 이벤트 전달 (팝업/모달 확인용)
-        backPressHandled = false;
+
         try {
-            Bridge bridge = getBridge();
-            if (bridge != null) {
-                bridge.triggerWindowJSEvent("androidBackButton", "{}");
-                System.out.println(TAG + ": JavaScript에 백 버튼 이벤트 전달");
-                
-                // JavaScript 처리를 위해 100ms 대기
-                new Handler().postDelayed(() -> {
-                    if (backPressHandled) {
-                        // JavaScript에서 처리됨 (팝업 닫기 등)
-                        System.out.println(TAG + ": JavaScript에서 백 버튼 처리 완료");
-                        return;
-                    }
-                    
-                    // 2단계: WebView 히스토리 확인
+
+            String jsCode = 
+                "function closeDialogByDOM() {" +
+                "    const dialogs = document.querySelectorAll('.v-dialog.v-overlay--active');" +
+                "    " +
+                "    if (dialogs.length > 0) {" +
+                "        dialogs.forEach(dialog => {" +
+                "            dialog.remove();" +
+                "        });" +
+                "        " +
+                "        const overlays = document.querySelectorAll('.v-overlay');" +
+                "        overlays.forEach(overlay => overlay.remove());" +
+                "        " +
+                "        return true;" +
+                "    }" +
+                "    " +
+                "    return false;" +
+                "}" +
+                "closeDialogByDOM();";
+
+            webView.evaluateJavascript(jsCode, result -> {
+                if ("true".equals(result)) {
+                    System.out.println(TAG + ": 다이얼로그 닫기 완료");
+                    return;
+                } else {
                     if (webView.canGoBack()) {
                         System.out.println(TAG + ": WebView 뒤로 가기 실행");
                         webView.goBack();
-                        return;
+                    } else {
+                        handleAppExit();
                     }
-                    
-                    // 3단계: 앱 종료 확인
-                    handleAppExit();
-                }, 100);
-            } else {
-                // Bridge가 없으면 바로 WebView 히스토리 확인
-                if (webView.canGoBack()) {
-                    webView.goBack();
-                } else {
-                    handleAppExit();
                 }
-            }
+            });
         } catch (Exception e) {
             System.err.println(TAG + ": 백 버튼 처리 중 오류: " + e.getMessage());
             // 오류 발생 시 기본 동작
