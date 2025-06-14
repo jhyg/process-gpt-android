@@ -236,6 +236,50 @@ public class MainActivity extends BridgeActivity {
                 });
             }
         });
+        
+        // 알림 클릭으로 앱이 시작된 경우 URL 처리
+        handleNotificationIntent(getIntent());
+    }
+    
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        
+        // 앱이 이미 실행 중인 상태에서 알림 클릭 시 처리
+        handleNotificationIntent(intent);
+    }
+    
+    /**
+     * 알림에서 전달된 Intent 처리 (URL 리다이렉트)
+     */
+    private void handleNotificationIntent(Intent intent) {
+        if (intent == null) return;
+        
+        try {
+            // FCM 데이터에서 URL 확인
+            String redirectUrl = intent.getStringExtra("url");
+            
+            if (redirectUrl != null && !redirectUrl.isEmpty()) {
+                System.out.println(TAG + ": 알림에서 URL 발견: " + redirectUrl);
+                
+                // WebView가 준비될 때까지 잠시 대기 후 URL 로드
+                new Handler().postDelayed(() -> {
+                    WebView webView = getBridge().getWebView();
+                    if (webView != null) {
+                        webView.loadUrl(redirectUrl);
+                        System.out.println(TAG + ": URL로 리다이렉트 완료: " + redirectUrl);
+                    } else {
+                        System.err.println(TAG + ": WebView가 null입니다.");
+                    }
+                }, 500); // 500ms 대기
+            } else {
+                System.out.println(TAG + ": 알림에 URL이 없습니다.");
+            }
+        } catch (Exception e) {
+            System.err.println(TAG + ": 알림 Intent 처리 중 오류: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     private String normalizeUrl(String url) {
