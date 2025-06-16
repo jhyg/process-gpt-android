@@ -18,18 +18,14 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.Bridge;
-import android.content.SharedPreferences;
-import java.util.Set;
-import java.util.HashSet;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
+import androidx.core.content.ContextCompat;
 
 public class FCMService extends FirebaseMessagingService {
     private static final String CHANNEL_ID = "process_gpt_channel";
     private static final String TAG = "ProcessGPTFCM";
-    private static final String PREFS_NAME = "FCMMessageHashes";
-    private static final String PROCESSED_MESSAGES_KEY = "processed_message_hashes";
-    private static final long MESSAGE_DUPLICATE_TIME_WINDOW = 30 * 1000; // 30초
     
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
@@ -42,174 +38,15 @@ public class FCMService extends FirebaseMessagingService {
         String body = remoteMessage.getNotification() != null ? 
                 remoteMessage.getNotification().getBody() : data.get("body");
         
-        // 메시지 내용 해시 생성 및 중복 확인
-        String messageHash = generateMessageHash(title, body, data);
-        if (isDuplicateMessage(messageHash)) {
-            System.out.println(TAG + ": 중복 메시지 감지, 무시합니다. Hash: " + messageHash);
-            System.out.println(TAG + ": 내용 - " + title + ": " + body);
-            return;
-        }
-        
-        // 메시지 ID 정보
-        String messageId = remoteMessage.getMessageId();
-        
         // 디버그 로그
         System.out.println(TAG + ": 푸시 알림 수신 - " + title + ": " + body);
-        System.out.println(TAG + ": MessageId: " + messageId + ", Hash: " + messageHash);
         
-        // 메시지 해시 저장 (중복 방지용)
-        saveProcessedMessageHash(messageHash);
-        
-        // 앱이 포그라운드 상태일 때도 알림을 표시
-        sendNotification(title, body, data);
-        
-        // 앱이 포그라운드 상태일 때 Bridge에 알림 데이터 전달
-        try {
-            Bridge bridge = MainActivity.getCapBridge();
-            if (bridge != null) {
-                JSObject notificationJson = new JSObject();
-                notificationJson.put("title", title);
-                notificationJson.put("body", body);
-                notificationJson.put("messageId", messageId);
-                notificationJson.put("messageHash", messageHash);
-                
-                // 데이터 필드 추가
-                JSObject dataJson = new JSObject();
-                for (Map.Entry<String, String> entry : data.entrySet()) {
-                    dataJson.put(entry.getKey(), entry.getValue());
-                }
-                notificationJson.put("data", dataJson);
-                
-                // Capacitor 이벤트 발생 (runOnUiThread 사용)
-                MainActivity activity = (MainActivity) bridge.getActivity();
-                if (activity != null) {
-                    activity.runOnUiThread(() -> {
-                        bridge.triggerWindowJSEvent("pushNotificationReceived", notificationJson.toString());
-                        System.out.println(TAG + ": 포그라운드 이벤트 전달 성공 (Hash: " + messageHash + ")");
-                    });
-                }
-            } else {
-                System.err.println(TAG + ": Bridge가 null입니다.");
-            }
-        } catch (Exception e) {
-            System.err.println(TAG + ": Capacitor 이벤트 전달 중 오류: " + e.getMessage());
-            e.printStackTrace();
-        }
-    }
-    
-    /**
-     * 메시지 내용으로 해시값 생성
-     */
-    private String generateMessageHash(String title, String body, Map<String, String> data) {
-        StringBuilder contentBuilder = new StringBuilder();
-        
-        // 기본 정보 추가
-        contentBuilder.append(title != null ? title : "");
-        contentBuilder.append("|");
-        contentBuilder.append(body != null ? body : "");
-        contentBuilder.append("|");
-        
-        // 중요한 데이터 필드들 추가 (보낸사람, 채팅방 등)
-        String[] importantKeys = {"sender", "senderId", "senderName", "roomId", "roomName", "chatId", "from", "type"};
-        for (String key : importantKeys) {
-            if (data.containsKey(key)) {
-                contentBuilder.append(key).append(":").append(data.get(key)).append("|");
-            }
-        }
-        
-        String content = contentBuilder.toString();
-        
-        try {
-            // SHA-256 해시 생성
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(content.getBytes("UTF-8"));
-            
-            // 바이트 배열을 16진수 문자열로 변환
-            StringBuilder hexString = new StringBuilder();
-            for (byte b : hash) {
-                String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1) {
-                    hexString.append('0');
-                }
-                hexString.append(hex);
-            }
-            return hexString.toString().substring(0, 16); // 앞 16자리만 사용
-        } catch (Exception e) {
-            System.err.println(TAG + ": 해시 생성 오류: " + e.getMessage());
-            // 해시 생성 실패 시 문자열 해시코드 사용
-            return String.valueOf(Math.abs(content.hashCode()));
-        }
-    }
-    
-    /**
-     * 메시지 해시가 이미 처리되었는지 확인 (시간 기반)
-     */
-    private boolean isDuplicateMessage(String messageHash) {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        Set<String> processedHashes = prefs.getStringSet(PROCESSED_MESSAGES_KEY, new HashSet<>());
-        
-        // 현재 시간과 함께 저장된 해시 형식: "messageHash:timestamp"
-        long currentTime = System.currentTimeMillis();
-        
-        // 기존 해시들 중에서 시간 윈도우 내의 것들만 확인
-        Set<String> validHashes = new HashSet<>();
-        for (String entry : processedHashes) {
-            String[] parts = entry.split(":");
-            if (parts.length == 2) {
-                try {
-                    long timestamp = Long.parseLong(parts[1]);
-                    if (currentTime - timestamp < MESSAGE_DUPLICATE_TIME_WINDOW) {
-                        validHashes.add(entry);
-                        // 해시가 일치하는지 확인
-                        if (parts[0].equals(messageHash)) {
-                            return true; // 중복 메시지
-                        }
-                    }
-                } catch (NumberFormatException e) {
-                    // 잘못된 형식은 무시
-                }
-            }
-        }
-        
-        // 시간 윈도우를 벗어난 해시들 정리
-        if (validHashes.size() != processedHashes.size()) {
-            prefs.edit().putStringSet(PROCESSED_MESSAGES_KEY, validHashes).apply();
-        }
-        
-        return false; // 새로운 메시지
-    }
-    
-    /**
-     * 처리된 메시지 해시 저장
-     */
-    private void saveProcessedMessageHash(String messageHash) {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        Set<String> processedHashes = new HashSet<>(prefs.getStringSet(PROCESSED_MESSAGES_KEY, new HashSet<>()));
-        
-        // 현재 시간과 함께 저장: "messageHash:timestamp"
-        String entry = messageHash + ":" + System.currentTimeMillis();
-        processedHashes.add(entry);
-        
-        prefs.edit().putStringSet(PROCESSED_MESSAGES_KEY, processedHashes).apply();
-        System.out.println(TAG + ": 메시지 해시 저장 완료: " + messageHash);
-    }
-
-    @Override
-    public void onNewToken(String token) {
-        System.out.println(TAG + ": 새 FCM 토큰: " + token);
-        
-        // FCM 토큰이 갱신되면 브릿지를 통해 웹앱에 알림
-        try {
-            Bridge bridge = MainActivity.getCapBridge();
-            if (bridge != null) {
-                JSObject tokenJson = new JSObject();
-                tokenJson.put("value", token);
-                
-                // Capacitor 이벤트 발생
-                bridge.triggerWindowJSEvent("pushNotificationToken", tokenJson.toString());
-            }
-        } catch (Exception e) {
-            System.err.println(TAG + ": Capacitor 토큰 이벤트 전달 중 오류: " + e.getMessage());
+        // 앱이 포그라운드 상태인지 확인
+        if (MainActivity.isAppInForeground()) {
+            System.out.println(TAG + ": 앱이 포그라운드 상태이므로 알림 표시하지 않음");
+        } else {
+            // 앱이 백그라운드일 때만 알림 표시
+            sendNotification(title, body, data);
         }
     }
 
@@ -230,10 +67,14 @@ public class FCMService extends FirebaseMessagingService {
         // 알림 사운드 설정
         Uri defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
         
+        // 앱 아이콘을 비트맵으로 변환하여 Large Icon으로 사용
+        Bitmap largeIconBitmap = getLauncherIconBitmap();
+        
         // 알림 생성
         NotificationCompat.Builder notificationBuilder =
                 new NotificationCompat.Builder(this, CHANNEL_ID)
-                        .setSmallIcon(R.drawable.ic_launcher_foreground)
+                        .setSmallIcon(R.drawable.ic_noti) // 전용 알림 아이콘
+                        .setLargeIcon(largeIconBitmap) // 큰 아이콘 (앱 아이콘)
                         .setContentTitle(title)
                         .setContentText(messageBody)
                         .setAutoCancel(true)
@@ -264,5 +105,45 @@ public class FCMService extends FirebaseMessagingService {
         // 알림 표시 (고유한 ID 생성)
         int notificationId = (int) System.currentTimeMillis();
         notificationManager.notify(notificationId, notificationBuilder.build());
+    }
+    
+    /**
+     * 앱 런처 아이콘을 비트맵으로 변환하여 반환
+     */
+    private Bitmap getLauncherIconBitmap() {
+        try {
+            System.out.println(TAG + ": 앱 아이콘 비트맵 생성 시작");
+            
+            // 앱 아이콘 가져오기 (ic_launcher 또는 ic_launcher_round 사용)
+            Drawable iconDrawable = ContextCompat.getDrawable(this, R.mipmap.ic_launcher);
+            System.out.println(TAG + ": ic_launcher 로드 결과: " + (iconDrawable != null ? "성공" : "실패"));
+            
+            if (iconDrawable == null) {
+                // ic_launcher가 없으면 ic_launcher_foreground 사용
+                iconDrawable = ContextCompat.getDrawable(this, R.mipmap.ic_launcher_foreground);
+                System.out.println(TAG + ": ic_launcher_foreground 로드 결과: " + (iconDrawable != null ? "성공" : "실패"));
+            }
+            
+            if (iconDrawable != null) {
+                // Drawable을 Bitmap으로 변환
+                Bitmap bitmap = Bitmap.createBitmap(
+                    iconDrawable.getIntrinsicWidth(),
+                    iconDrawable.getIntrinsicHeight(),
+                    Bitmap.Config.ARGB_8888
+                );
+                
+                Canvas canvas = new Canvas(bitmap);
+                iconDrawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+                iconDrawable.draw(canvas);
+                
+                System.out.println(TAG + ": 앱 아이콘 비트맵 생성 완료");
+                return bitmap;
+            }
+        } catch (Exception e) {
+            System.err.println(TAG + ": 앱 아이콘 비트맵 생성 중 오류: " + e.getMessage());
+        }
+        
+        // 기본값으로 null 반환 (Large Icon 없이 표시됨)
+        return null;
     }
 } 

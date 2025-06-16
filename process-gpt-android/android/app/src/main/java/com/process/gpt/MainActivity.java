@@ -53,6 +53,7 @@ public class MainActivity extends BridgeActivity {
     private PermissionRequest pendingPermissionRequest;
     private ValueCallback<Uri[]> fileUploadCallback;
     private String fcmToken = null; // FCM 토큰 저장
+    private static boolean isAppInForeground = false; // 앱 포그라운드 상태 추적
     
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -239,6 +240,27 @@ public class MainActivity extends BridgeActivity {
         
         // 알림 클릭으로 앱이 시작된 경우 URL 처리
         handleNotificationIntent(getIntent());
+    }
+    
+    @Override
+    public void onResume() {
+        super.onResume();
+        isAppInForeground = true;
+        // 앱을 열면 모든 알림과 뱃지 제거
+        NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (notificationManager != null) {
+            notificationManager.cancelAll();
+        }
+    }
+    
+    @Override
+    public void onPause() {
+        super.onPause();
+        isAppInForeground = false;
+    }
+    
+    public static boolean isAppInForeground() {
+        return isAppInForeground;
     }
     
     @Override
